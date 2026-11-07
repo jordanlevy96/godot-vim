@@ -1,4 +1,4 @@
-extends Object
+extends RefCounted
 
 var handlers: Dictionary = {
 	"goto": preload("res://addons/godot_vim/commands/goto.gd"),

@@ -102,12 +102,6 @@ func _init_cursor(code_edit: CodeEdit, language: LANGUAGE):
 		cursor.queue_free()
 
 	cursor = Cursor.new()
-	code_edit.select(
-		code_edit.get_caret_line(),
-		code_edit.get_caret_column(),
-		code_edit.get_caret_line(),
-		code_edit.get_caret_column() + 1
-	)
 	cursor.code_edit = code_edit
 	cursor.language = language
 	cursor.globals = globals
@@ -158,7 +152,7 @@ func _load(forced: bool = false):
 	if script_editor == null:
 		return
 	var script_editor_base = script_editor.get_current_editor()
-	if script_editor_base == null:
+	if language != LANGUAGE.SHADER and script_editor_base == null:
 		return
 
 	globals.command_line = command_line
@@ -179,10 +173,9 @@ func _load(forced: bool = false):
 		script_editor_base.add_child(command_line)
 		return
 
-	# Get shader editor VBoxContainer
-	var shaders_container = code_edit
-	for i in 3:
-		shaders_container = shaders_container.get_parent()
+	# Attach below the shader editor's split view, independent of nested panes.
+	var shader_tab = get_shader_tabcontainer().get_current_tab_control()
+	var shaders_container = _select(shader_tab, ["VBoxContainer"])
 	if shaders_container == null:
 		# We do not print an error here because for this to fail,
 		#  get_shader_code_edit() (through find_code_edit()) must have
@@ -218,71 +211,45 @@ func find_code_edit() -> Dictionary:
 	}
 
 
-## Gets the regular GDScript CodeEdit
-func get_regular_code_edit():
+## Gets the regular GDScript CodeEdit using the public ScriptEditorBase API.
+func get_regular_code_edit() -> CodeEdit:
 	var editor = EditorInterface.get_script_editor().get_current_editor()
-	return _select(editor, ["VSplitContainer", "CodeTextEditor", "CodeEdit"])
+	if editor == null:
+		return null
+	return editor.get_base_editor() as CodeEdit
 
 
-# FIXME Handle cases where the shader editor is its own floating window
-## Gets the shader editor's CodeEdit
-## Returns Option<CodeEdit> (aka CodeEdit or null)
-func get_shader_code_edit():
+## Returns the active text shader editor, ignoring visual shaders and other tabs.
+func get_shader_code_edit() -> CodeEdit:
 	var container = get_shader_tabcontainer()
-	if container == null:
-		push_error(
-			"[Godot VIM] Failed to get shader editor's TabContainer. Vim will be disabled in the shader editor"
-		)
+	if container == null or !container.is_visible_in_tree():
 		return null
-
-	# Panel not open
-	if !container.is_visible_in_tree():
+	var editor = container.get_current_tab_control()
+	if editor == null or !editor.is_class("TextShaderEditor"):
 		return null
-
-	var editors = container.get_children(false)
-	for tse in editors:
-		if !tse.visible:  # Not open
-			continue
-
-		var code_edit = _select(
-			tse, ["VBoxContainer", "VSplitContainer", "ShaderTextEditor", "CodeEdit"]
-		)
-
-		if code_edit == null:
-			push_error(
-				"[Godot Vim] Failed to get shader editor's CodeEdit. Vim will be disabled in the shader editor"
-			)
-			return null
-
-		return code_edit
+	var code_edits = editor.find_children("*", "CodeEdit", true, false)
+	return code_edits[0] as CodeEdit if !code_edits.is_empty() else null
 
 
-## Returns Option<TabContainer> (aka either TabContainer or null if it fails)
-func get_shader_tabcontainer():
-	# Get the VSplitContainer containing the script editor and bottom panels
-	var container = EditorInterface.get_script_editor()
-	for i in 6:
-		container = container.get_parent()
-	if container == null:
-		# We don't print an error here, let us handle this exception elsewhere
-		return null
-
-	# Get code edit
-	container = _select(
-		container,
-		["PanelContainer", "VBoxContainer", "WindowWrapper", "HSplitContainer", "TabContainer"]
-	)
-	return container
+func get_shader_tabcontainer() -> TabContainer:
+	# Godot 4.6+ hosts the shader editor in an EditorDock rather than the
+	# old fixed ancestor chain through a WindowWrapper.
+	var dock = EditorInterface.get_base_control().find_child("Shader Editor", true, false)
+	if dock != null:
+		return _select(dock, ["HSplitContainer", "TabContainer"]) as TabContainer
+	return null
 
 
-func _select(obj: Node, types: Array[String]):
-	if not obj:
-		return null
+func _select(obj: Node, types: Array[String]) -> Node:
 	for type in types:
+		if obj == null:
+			return null
+		var match_node: Node = null
 		for child in obj.get_children():
 			if child.is_class(type):
-				obj = child
-				continue
+				match_node = child
+				break
+		obj = match_node
 	return obj
 
 

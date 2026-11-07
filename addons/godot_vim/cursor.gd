@@ -17,8 +17,9 @@ var key_map: KeyMap
 var mode: Mode = Mode.NORMAL
 # For visual modes:
 # `selection_from` is the origin point of the selection
-# code_edit's caret pos is the end point of the selection (the one the user can move)
+# `selection_to` is the inclusive endpoint; TextEdit uses an exclusive endpoint.
 var selection_from: Vector2i = Vector2i()
+var selection_to: Vector2i = Vector2i()
 
 var globals: Dictionary = {}
 
@@ -291,7 +292,12 @@ func is_line_commented(line: int) -> bool:
 
 func set_mode(m: int):
 	var old_mode: int = mode
+	var old_pos: Vector2i = get_caret_pos()
 	mode = m
+	if is_mode_visual(old_mode) and !is_mode_visual(mode) and code_edit.has_selection():
+		code_edit.deselect()
+		code_edit.set_caret_line(old_pos.y)
+		code_edit.set_caret_column(old_pos.x)
 	command_line.close()
 
 	match mode:
@@ -311,14 +317,16 @@ func set_mode(m: int):
 				move_column(-1)
 
 		Mode.VISUAL:
-			if old_mode != Mode.VISUAL_LINE:
-				selection_from = Vector2i(code_edit.get_caret_column(), code_edit.get_caret_line())
+			if !is_mode_visual(old_mode):
+				selection_from = old_pos
+				selection_to = old_pos
 			status_bar.set_mode_text(Mode.VISUAL)
 			update_visual_selection()
 
 		Mode.VISUAL_LINE:
-			if old_mode != Mode.VISUAL:
-				selection_from = Vector2i(code_edit.get_caret_column(), code_edit.get_caret_line())
+			if !is_mode_visual(old_mode):
+				selection_from = old_pos
+				selection_to = old_pos
 			status_bar.set_mode_text(Mode.VISUAL_LINE)
 			update_visual_selection()
 
@@ -328,6 +336,7 @@ func set_mode(m: int):
 			status_bar.set_mode_text(Mode.COMMAND)
 
 		Mode.INSERT:
+			code_edit.deselect()
 			code_edit.call_deferred("grab_focus")
 			status_bar.set_mode_text(Mode.INSERT)
 
@@ -345,7 +354,7 @@ func move_line(offset: int):
 
 
 func get_line() -> int:
-	return code_edit.get_caret_line()
+	return selection_to.y if is_mode_visual(mode) else code_edit.get_caret_line()
 
 
 func get_line_text(line: int = -1) -> String:
@@ -371,14 +380,18 @@ func set_caret_pos(line: int, column: int):
 
 
 func get_caret_pos() -> Vector2i:
-	return Vector2i(code_edit.get_caret_column(), code_edit.get_caret_line())
+	return Vector2i(get_column(), get_line())
 
 
 func set_line(position: int):
-	code_edit.set_caret_line(min(position, code_edit.get_line_count() - 1))
-
+	position = clampi(position, 0, code_edit.get_line_count() - 1)
 	if is_mode_visual(mode):
+		selection_to.y = position
+		selection_to.x = mini(selection_to.x, get_line_length(position))
 		update_visual_selection()
+	else:
+		code_edit.deselect()
+		code_edit.set_caret_line(position)
 
 
 func move_column(offset: int):
@@ -386,41 +399,42 @@ func move_column(offset: int):
 
 
 func get_column():
-	return code_edit.get_caret_column()
+	return selection_to.x if is_mode_visual(mode) else code_edit.get_caret_column()
 
 
 func set_column(position: int):
-	code_edit.set_caret_column(min(get_line_length(), position))
-
+	position = clampi(position, 0, get_line_length())
 	if is_mode_visual(mode):
+		selection_to.x = position
 		update_visual_selection()
+	else:
+		code_edit.deselect()
+		code_edit.set_caret_column(position)
 
 
 func select(from_line: int, from_col: int, to_line: int, to_col: int):
-	code_edit.select(from_line, from_col, to_line, to_col + 1)
 	selection_from = Vector2i(from_col, from_line)
 	set_caret_pos(to_line, to_col)
+	if !is_mode_visual(mode):
+		code_edit.select(from_line, from_col, to_line, to_col + 1)
 	# status_bar.set_mode_text(Mode.VISUAL)
 
 
 func update_visual_selection():
-	var selection_to: Vector2i = Vector2i(code_edit.get_caret_column(), code_edit.get_caret_line())
 	if mode == Mode.VISUAL:
 		var backwards: bool = (
 			selection_to.x < selection_from.x
 			if selection_to.y == selection_from.y
 			else selection_to.y < selection_from.y
 		)
-		code_edit.select(
-			selection_from.y,
-			selection_from.x + int(backwards),
-			selection_to.y,
-			selection_to.x + int(!backwards)
-		)
+		var origin: Vector2i = next_text_position(selection_from) if backwards else selection_from
+		var endpoint: Vector2i = selection_to if backwards else next_text_position(selection_to)
+		code_edit.select(origin.y, origin.x, endpoint.y, endpoint.x)
 	elif mode == Mode.VISUAL_LINE:
-		var f: int = mini(selection_from.y, selection_to.y) - 1
+		var first: int = mini(selection_from.y, selection_to.y)
+		var f: int = maxi(0, first - 1)
 		var t: int = maxi(selection_from.y, selection_to.y)
-		code_edit.select(f, get_line_length(f), t, get_line_length(t))
+		code_edit.select(f, get_line_length(f) if first > 0 else 0, t, get_line_length(t))
 
 
 func is_mode_visual(m: int) -> bool:
@@ -456,32 +470,60 @@ func get_stream_char(stream: String, idx: int) -> String:
 	return stream[idx] if stream.length() > idx else ""
 
 
-func draw_cursor():
-	if code_edit.is_dragging_cursor() and code_edit.get_selected_text() != "":
-		selection_from = Vector2i(
-			code_edit.get_selection_from_column(), code_edit.get_selection_from_line()
-		)
+# A line's length represents its newline when another line follows it.
+func previous_text_position(position: Vector2i) -> Vector2i:
+	if position.x > 0:
+		return position + Vector2i.LEFT
+	if position.y > 0:
+		return Vector2i(get_line_length(position.y - 1), position.y - 1)
+	return Vector2i.ZERO
 
-	if code_edit.get_selected_text(0).length() > 1 and !is_mode_visual(mode):
+
+func next_text_position(position: Vector2i) -> Vector2i:
+	if position.x < get_line_length(position.y):
+		return position + Vector2i.RIGHT
+	if position.y < code_edit.get_line_count() - 1:
+		return Vector2i(0, position.y + 1)
+	return position
+
+
+func adopt_mouse_selection():
+	var origin := Vector2i(
+		code_edit.get_selection_origin_column(), code_edit.get_selection_origin_line()
+	)
+	var endpoint := Vector2i(code_edit.get_caret_column(), code_edit.get_caret_line())
+	if endpoint.y > origin.y or (endpoint.y == origin.y and endpoint.x > origin.x):
+		endpoint = previous_text_position(endpoint)
+	else:
+		origin = previous_text_position(origin)
+	selection_from = origin
+	selection_to = endpoint
+	if !is_mode_visual(mode):
+		# Do not call set_mode(): rebuilding the selection would replace the
+		# native drag anchor and exclusive endpoint while the mouse is held.
+		mode = Mode.VISUAL
+		command_line.close()
+		status_bar.set_mode_text(mode)
 		code_edit.release_focus()
 		self.grab_focus()
-		set_mode(Mode.VISUAL)
 
+
+func draw_cursor():
 	if mode == Mode.INSERT:
-		if code_edit.has_selection(0):
-			code_edit.deselect(0)
+		return
+
+	if code_edit.is_dragging_cursor() and code_edit.has_selection():
+		adopt_mouse_selection()
 		return
 
 	if mode != Mode.NORMAL:
 		return
 
 	var line: int = code_edit.get_caret_line()
-	var column: int = code_edit.get_caret_column()
-	if column >= code_edit.get_line(line).length():
-		column -= 1
-		code_edit.set_caret_column(column)
-
-	code_edit.select(line, column, line, column + 1)
+	var column: int = clampi(code_edit.get_caret_column(), 0, maxi(0, get_line_length(line) - 1))
+	# Since Godot 4.3, select() moves the caret to its last endpoint. Select
+	# backwards so our block highlight leaves the caret on the current character.
+	code_edit.select(line, column + 1, line, column)
 
 
 #region COMMANDS

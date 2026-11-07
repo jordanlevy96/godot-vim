@@ -1,0 +1,30 @@
+name: Godot compatibility
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        godot: ["4.6.3", "4.7.2"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official Godot editor
+        env:
+          GODOT_VERSION: ${{ matrix.godot }}
+        run: |
+          archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl --fail --location --retry 3 \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${archive}" \
+            --output "$RUNNER_TEMP/godot.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+      - name: Run cursor and editor regression tests
+        env:
+          GODOT_VERSION: ${{ matrix.godot }}
+        run: python3 tests/run_tests.py "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
