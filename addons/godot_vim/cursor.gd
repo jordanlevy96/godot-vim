@@ -114,7 +114,13 @@ func get_word_edge_pos(
 
 			col += search_dir
 		line += search_dir
+		if line < 0 or line >= code_edit.get_line_count():
+			break
 		text = get_line_text(line)
+		# Vim treats an empty line as a word for w/W, b/B and ge/gE.
+		# Forward end motions e/E skip empty lines instead.
+		if text.is_empty() and !(forward and word_end):
+			return Vector2i(0, line)
 		col = (text.length() - 1) * int(search_dir < 0)
 
 	return Vector2i(from_col, from_line)
@@ -178,6 +184,10 @@ func find_char_in_line(
 	line: int, from_col: int, forward: bool, stop_before: bool, char: String
 ) -> int:
 	var text: String = get_line_text(line)
+
+	# rfind(..., -1) searches from the end, rather than before column zero.
+	if !forward and from_col <= 0:
+		return -1
 
 	# Search char
 	var col: int = text.find(char, from_col + 1) if forward else text.rfind(char, from_col - 1)
@@ -364,8 +374,10 @@ func get_line_text(line: int = -1) -> String:
 
 
 func get_char_at(line: int, col: int) -> String:
+	if line < 0 or line >= code_edit.get_line_count():
+		return ""
 	var text: String = code_edit.get_line(line)
-	if col > 0 and col < text.length():
+	if col >= 0 and col < text.length():
 		return text[col]
 	return ""
 
@@ -687,13 +699,21 @@ func cmd_find_in_line_again(args_mut: Dictionary) -> Vector2i:
 
 	var last_search: Dictionary = globals.last_search
 	var line: int = get_line()
+	var forward: bool = last_search.get("forward", false) != args_mut.get("invert", false)
+	var stop_before: bool = last_search.get("stop_before", false)
 	var col: int = find_char_in_line(
-		line,
-		get_column(),
-		last_search.get("forward", false) != args_mut.get("invert", false),  # Invert 'forward' if necessary (xor)
-		last_search.get("stop_before", false),
-		last_search.get("selected_char", "")
+		line, get_column(), forward, stop_before, last_search.get("selected_char", "")
 	)
+	# t/T leave the cursor beside the match. Skip a match that would
+	# leave a repeat stationary, including when its direction is reversed.
+	if stop_before and col == get_column():
+		col = find_char_in_line(
+			line,
+			get_column() + (1 if forward else -1),
+			forward,
+			stop_before,
+			last_search.get("selected_char", "")
+		)
 
 	args_mut.inclusive = globals.last_search.get("inclusive", false)
 	if col >= 0:

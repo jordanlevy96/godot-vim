@@ -99,6 +99,8 @@ func apply(key_map: Array[Dictionary]):
 
 		ApplyMode.REPLACE:
 			var constraints: Dictionary = {"keys": inner.get("keys", [])}
+			if inner.has("context"):
+				constraints.context = inner.context
 			var index: int = _find(key_map, constraints)
 			if index == -1:
 				return
@@ -161,7 +163,9 @@ func _find(key_map: Array[Dictionary], constraints: Dictionary) -> int:
 
 	for i in key_map.size():
 		var cmd: Dictionary = key_map[i]
-		# Check keys
+		# Remapping addresses exact bindings, not executable operator prefixes.
+		if cmd.keys.size() != keys.size():
+			continue
 		var m: KeyMap.KeyMatch = KeyMap.match_keys(cmd.keys, keys)
 		if m != KeyMap.KeyMatch.Full:
 			continue

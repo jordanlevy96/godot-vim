@@ -211,7 +211,7 @@ var key_map: Array[Dictionary] = [
 	{
 		"keys": ["a", "W"],
 		"type": Motion,
-		"motion": {"type": "text_object_word", "around": true, "inclusive": true}
+		"motion": {"type": "text_object_word", "around": true, "big_word": true, "inclusive": true}
 	},
 	{"keys": ["i", "w"], "type": Motion, "motion": {"type": "text_object_word", "inclusive": true}},
 	{
@@ -609,11 +609,23 @@ func execute(cmd: Dictionary):
 func operator_motion(operator: Dictionary, motion: Dictionary):
 	# print("[KeyMay::execute_operator_motion()] op = ", operator, ", motion = ", motion) # DEBUG
 
-	# Execute motion before operation
-	var p = call_cmd(motion)  # Vector2i for normal motion, or [Vector2i, Vector2i] for text object
+	# cw/cW on a nonblank character changes the current word, excluding
+	# following whitespace. Unlike e/E, it stays on the current word's last char.
+	var changing_word: bool = (
+		operator.type == "change" and motion.type == "move_by_word"
+		and motion.get("forward", true) and !motion.get("word_end", false)
+		and !cursor.get_char_at(cursor.get_line(), cursor.get_column()).strip_edges().is_empty()
+	)
+	var p: Variant
+	if changing_word:
+		p = cursor.get_word_edge_pos(
+			cursor.get_line(), cursor.get_column() - 1, true, true, motion.get("big_word", false)
+		)
+	else:
+		p = call_cmd(motion)  # Vector2i for a motion, or a pair for a text object.
 	if p is Vector2i:
 		var p0: Vector2i = cursor.get_caret_pos()
-		if motion.get("inclusive", false):
+		if changing_word or motion.get("inclusive", false):
 			p.x += 1
 		cursor.code_edit.select(p0.y, p0.x, p.y, p.x)
 	elif p is Array:

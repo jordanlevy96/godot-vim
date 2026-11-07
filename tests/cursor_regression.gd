@@ -6,6 +6,7 @@ const Mode = Cursor.Mode
 var cursor: Cursor
 var edit: CodeEdit
 var failures: int = 0
+var assertions: int = 0
 
 
 func _initialize():
@@ -13,6 +14,7 @@ func _initialize():
 
 
 func check(condition: bool, description: String):
+	assertions += 1
 	if !condition:
 		failures += 1
 		push_error(description)
@@ -152,5 +154,5 @@ func run():
 	edit.insert_text_at_caret("X")
 	check(edit.text == "X", "Append works in an empty buffer")
 
-	print("Cursor regression tests: %s" % ("PASS" if failures == 0 else "%d failures" % failures))
+	print("Cursor regression tests: %s (%d assertions)" % ["PASS" if failures == 0 else "%d failures" % failures, assertions])
 	quit(0 if failures == 0 else 1)

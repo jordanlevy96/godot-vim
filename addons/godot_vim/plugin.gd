@@ -62,6 +62,9 @@ func mark_recent_file(path: String):
 	if !globals.has("marks"):
 		globals.marks = {}
 	var marks: Dictionary = globals.marks
+	# The editor can emit repeated changes for the same script.
+	if marks.has("-1") and marks["-1"].file == path:
+		return
 
 	# Check if path is already in the recent files (stored in start_index)
 	# This is to avoid flooding the recent files list with the same files

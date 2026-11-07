@@ -24,7 +24,15 @@ jobs:
             --output "$RUNNER_TEMP/godot.zip"
           unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
           chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
-      - name: Run cursor and editor regression tests
+      - name: Run expanded regression suites
         env:
           GODOT_VERSION: ${{ matrix.godot }}
-        run: python3 tests/run_tests.py "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+        run: python3 tests/run_tests.py "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" --report "test-results-${GODOT_VERSION}.json"
+
+      - name: Save test counts and known gaps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.godot }}
+          path: test-results-${{ matrix.godot }}.json
+          if-no-files-found: error
