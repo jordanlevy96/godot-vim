@@ -4,6 +4,7 @@ extends EditorPlugin
 const Mode = preload("res://addons/godot_vim/constants.gd").Mode
 var failures: Array[String] = []
 var assertions := 0
+var known_failures := 0
 var scenarios := 0
 
 func _enter_tree():
@@ -22,6 +23,18 @@ func _check(condition: bool, message: String):
 	if !condition:
 		failures.append(message)
 		push_error(message)
+
+# Exact known outcomes keep gaps visible without accepting unrelated regressions.
+func _known(actual: Variant, expected: Variant, known_actual: Variant, message: String):
+	assertions += 1
+	if actual == expected:
+		print("KNOWN ISSUE FIXED: ", message)
+	elif actual == known_actual:
+		known_failures += 1
+		print("KNOWN FAILURE: ", message, " expected ", expected, " actual ", actual)
+	else:
+		failures.append(message)
+		push_error("%s: unexpected result %s (expected %s)" % [message, actual, expected])
 
 func _vim() -> EditorPlugin:
 	for node in get_parent().get_children():
@@ -209,6 +222,15 @@ func _run():
 	_check(code.get_caret_line() == 2 and code.get_caret_column() == 20, "Search lands on hello")
 	_check(code.get_caret_count() == 1, "Search commit removes preview caret")
 	_check(vim.cursor.mode == Mode.NORMAL, "Search returns to normal")
+	# Exercise repeat-search keys rather than only the underlying search helpers.
+	vim.command_line.search_pattern = "e"
+	vim.cursor.set_caret_pos(0, 0)
+	await _key(KEY_N, 110)
+	_check(vim.cursor.get_caret_pos() == Vector2i(3, 0), "n selects the next regex match")
+	await _key(KEY_N, 78, true)
+	_known(vim.cursor.get_caret_pos(), Vector2i(0, 0), Vector2i(0, 3),
+		"N to a match at buffer offset zero lands on the final line")
+	vim.command_line.search_pattern = "hello"
 	var match_result = vim.search_regex(code, "extends", Vector2i(25, 2))
 	_check(match_result != null and match_result.get_start() == 0, "Forward search wraps in editor buffer")
 	match_result = vim.search_regex_backwards(code, "hello", Vector2i.ZERO)
@@ -246,9 +268,13 @@ func _run():
 	_check(vim.globals.marks == recent_before, "Repeated current-file notifications do not duplicate history")
 	_check(vim.dispatch(":marks") == OK, "Marks dispatcher succeeds")
 	_check(vim.status_bar.main_label.text.contains("sample.gd"), "Marks output names marked script")
-	vim.edit_script("res://tests/fixtures/sample.gd", Vector2i(4, 2))
+	# Test the actual backtick command, not just the edit_script helper.
+	await _key(KEY_QUOTELEFT, 96)
+	await _key(KEY_A, 97)
 	await _frames(10)
-	_check(vim.get_regular_code_edit() == code, "Plugin script navigation selects original tab")
+	_known(vim.cursor.get_caret_pos(), Vector2i(4, 2), Vector2i(3, 2),
+		"Cross-file backtick mark jump lands one column left")
+	_check(vim.get_regular_code_edit() == code, "Backtick mark command returns to original script")
 	_check(vim.cursor.code_edit == code, "Cursor follows plugin navigation")
 	_check(vim.dispatch(":delm") == OK, "Delete-marks alias resolves")
 	_check(vim.globals.marks.is_empty(), "Delete-marks alias clears marks")
@@ -303,7 +329,7 @@ func _run():
 
 func _finish():
 	if failures.is_empty():
-		print("EDITOR COMPATIBILITY TESTS PASSED: ", assertions, " assertions across ", scenarios, " scenarios")
+		print("EDITOR COMPATIBILITY TESTS PASSED: ", assertions, " assertions across ", scenarios, " scenarios; ", known_failures, " known failures")
 	else:
 		print("EDITOR COMPATIBILITY TESTS FAILED: ", failures.size(), "/", assertions, " assertions across ", scenarios, " scenarios: ", failures)
 	get_tree().quit(0 if failures.is_empty() else 1)

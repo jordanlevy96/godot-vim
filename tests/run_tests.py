@@ -13,6 +13,7 @@ import tempfile
 SUITES = {
     "cursor": ("cursor_regression.gd", "Cursor regression tests: PASS"),
     "keymap": ("keymap_regression.gd", "Keymap regression tests: PASS"),
+    "shortcuts": ("shortcut_inventory.gd", "Shortcut inventory tests: PASS"),
     "motion": ("motion_regression.gd", "Motion regression tests: PASS"),
     "edit": ("edit_regression.gd", "Edit regression tests: PASS"),
     "editor": (None, "EDITOR COMPATIBILITY TESTS PASSED"),

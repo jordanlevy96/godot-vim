@@ -5,6 +5,7 @@ Run the suites on Linux with an official Godot editor binary and Python 3:
 ```sh
 python3 tests/run_tests.py /path/to/godot --report results.json
 python3 tests/run_tests.py /path/to/godot --suite motion
+python3 tests/run_tests.py /path/to/godot --suite shortcuts
 python3 tests/run_tests.py /path/to/godot --strict-known
 ```
 
@@ -25,6 +26,10 @@ failures; it does not turn known failures or skipped checks into passes.
   key; operator composition and incomplete prefixes; context filtering; Unicode,
   control and special keys; reserved shortcuts; remap insertion/removal and
   context-specific replacement; Insert-mode timeout handling.
+- **Documented shortcut inventory:** an explicit list, independent of iterating
+  the implementation's map, verifies supported dispatch, operator/object
+  composition, Visual-mode restrictions, absent Vim features and Ex handler
+  names. These are parser checks, not semantic conformance assertions.
 - **Motions and text objects:** character, word/WORD, line, file, paragraph and
   section navigation; find/till and forward/reverse repeats; brace matching;
   quoted/bracketed/word/paragraph selections; empty, whitespace, short, Unicode,
@@ -36,6 +41,8 @@ failures; it does not turn known failures or skipped checks into passes.
   tabs; visual-shader safety; actual viewport-dispatched Vim events; command
   line, search, marks and recent files; unsaved-buffer preservation;
   reload/disable/re-enable; single UI nodes and signal connections; shutdown.
+  The shortcut audit adds real `n`/`N` events and a cross-file backtick mark jump,
+  revealing two additional defects that the earlier helper-level tests missed.
 
 Assertions are counted at execution time, per engine version. They are **not**
 source-line coverage or proof of complete Vim conformance. Parser/schema checks
@@ -53,17 +60,24 @@ Both official Linux binaries, Godot 4.6.3 and 4.7.2, execute the same totals:
 | --- | ---: | ---: |
 | Cursor compatibility | 51 | Original smoke scenarios |
 | Key parsing/remapping | 508 | 199 |
+| Documented shortcut inventory | 354 | 225 |
 | Motions/text objects | 239 | 230 |
 | Editing/operators | 255 | 111 |
-| Editor integration | 158 | 10 |
-| **Total per version** | **1,211** | **550 plus original cursor smoke scenarios** |
+| Editor integration | 161 | 10 |
+| **Total per version** | **1,568** | **775 plus original cursor smoke scenarios** |
 
-Of the 1,211 assertions, **1,209 pass and 2 reproduce the documented upstream
-EOF defect**. One clipboard integration scenario is skipped. There are no
-unexpected failures. The 68-to-1,211 increase is approximately **17.8 times** as
-many executed assertions, with broader behaviors covered rather than repeated
-runs counted as extra coverage. Strict-known mode is also verified to exit with
-failure while these two defects remain.
+Of the 1,568 assertions, **1,564 pass and 4 reproduce documented defects**.
+One native clipboard integration scenario is skipped. There are no unexpected
+failures. The preceding expansion at `da1c30e` had 1,211 assertions (1,209 pass,
+two known EOF failures). The shortcut audit adds 354 dispatch/inventory checks
+and three editor assertions, two of which expose existing search and mark-jump
+bugs. It does not change production behavior or claim those bugs are fixed.
+
+The original 68-to-1,211 expansion was approximately 17.8 times the executed
+assertions. Current totals are reported separately because most of this audit's
+additional checks describe mapping availability, not additional edit semantics.
+Repeated runs are not counted as extra coverage. Strict-known mode is verified
+to exit with failure while documented defects remain.
 
 ## Defects caught and fixed
 
@@ -84,11 +98,23 @@ line bounds as well as that representation.
 
 ## Known failures and limits
 
-- **Two known failures:** `o` at the final line inserts above instead of below,
+- **Two editing known failures:** `o` at the final line inserts above instead of below,
   on single-line and multiline buffers. These reproduce upstream
   [PR #32](https://github.com/bernardo-bruning/godot-vim/pull/32), whose separate
   fix is intentionally not duplicated here. Each check tolerates only the exact
   documented broken buffer; a different wrong result is an unexpected failure.
+- **Two editor known failures, exposed by the shortcut audit:**
+  - With `tests/fixtures/sample.gd`, pattern `e` and caret `(column 0, line 0)`,
+    `n` correctly moves to `(3, 0)`, but `N` returns `(0, 3)` instead of `(0, 0)`.
+    `idx_to_pos()` passes zero as the end of `String.count`, which means the
+    whole string. Any regex result at absolute index zero can be affected,
+    including slash-search submission/preview and wrapping.
+  - A cross-file backtick jump to a mark saved at `(4, 2)` selects the right
+    script but lands at `(3, 2)`. Godot's `EditorInterface.edit_script()` takes
+    one-based line and column values; the addon adjusts only the line.
+  Both are reproduced on 4.6.3 and 4.7.2. The checks accept only the exact known
+  wrong value or the correct result; unrelated wrong values fail unexpectedly.
+  These defects are documented rather than fixed by this audit.
 - **One skipped clipboard scenario:** the headless display has no native
   clipboard. Yank commands are exercised for mode and nonmutation, but clipboard
   contents and paste integration are not validated. An isolated graphical run
@@ -100,4 +126,13 @@ line bounds as well as that representation.
 - Runs cover Linux Godot 4.6.3 and 4.7.2 only. macOS, Windows, older versions,
   rendering backends, and all possible Vim command combinations are not covered.
 - Numeric counts and dot-repeat are not implemented by this addon; rejecting an
-  unsupported input is a safety check, not evidence that the feature works.
+  unsupported input is a dispatch-availability check, not evidence that the feature works.
+
+## Shortcut reference
+
+See [docs/vim-shortcuts.md](../docs/vim-shortcuts.md) for the supported-command
+matrix, mode-specific restrictions, missing Vim features and evidence level per
+entry. `ciw` has buffer-level coverage; mapped availability alone does not prove
+Vim semantics. The audit uses documented Vim semantics rather than a differential
+run against a Vim binary. `:w`/`:wa` saving, shader comment behavior, `cc` buffer
+behavior and visual viewport positioning remain specifically unverified.
